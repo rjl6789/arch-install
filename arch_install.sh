@@ -154,8 +154,8 @@ configure() {
     echo 'Installing additional packages'
     install_packages
 
-    echo 'Installing packer'
-    install_packer
+    echo 'Installing yay'
+    install_yay
 
     echo 'Installing AUR packages'
     install_aur_packages
@@ -182,7 +182,7 @@ configure() {
     set_hosts "$HOSTNAME"
 
     echo 'Setting fstab'
-    set_fstab "$TMP_ON_TMPFS" "$boot_dev"
+    set_fstab "$TMP_ON_TMPFS" "$efi_dev"
 
     echo 'Setting initial modules to load'
     set_modules_load
@@ -319,7 +319,7 @@ install_packages() {
     packages+=' alsa-utils pulseaudio pulseaudio-alsa aspell-en chromium firefox tlp mvim net-tools ntp openssh p7zip pkgfile python python2 rfkill rsync sudo unrar unzip wget zip zsh grml-zsh-config pinentry'
 
     # Development packages
-    packages+=' cmake gdb git tcpdump valgrind wireshark-qt'
+    packages+=' cmake curl gdb git tcpdump valgrind wireshark-qt'
 
     # Netcfg
     if [ -n "$WIRELESS_DEVICE" ]
@@ -369,14 +369,14 @@ install_packages() {
         packages+=' xf86-video-vesa'
     fi
 
-    pacman -Sy --noconfirm $packages
+    pacman -Sy --needed --noconfirm $packages
 }
 
-install_packer() {
+install_yay() {
     mkdir /foo
     cd /foo
-    curl https://aur.archlinux.org/packages/pa/packer/packer.tar.gz | tar xzf -
-    cd packer
+    curl https://aur.archlinux.org/cgit/aur.git/snapshot/yay.tar.gz | tar xzf -
+    cd yay
     makepkg -si --noconfirm --asroot
 
     cd /
@@ -386,9 +386,9 @@ install_packer() {
 install_aur_packages() {
     mkdir /foo
     export TMPDIR=/foo
-    packer -S --noconfirm android-udev
-    packer -S --noconfirm chromium-pepper-flash-stable
-    packer -S --noconfirm chromium-libpdf-stable
+    #yay -S --noconfirm android-udev
+    #yay -S --noconfirm chromium-pepper-flash-stable
+    #yay -S --noconfirm chromium-libpdf-stable
     unset TMPDIR
     rm -rf /foo
 }
@@ -410,26 +410,29 @@ set_hostname() {
 set_timezone() {
     local timezone="$1"; shift
 
-    ln -sT "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+    ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+    hwclock --systohc
 }
 
 set_locale() {
-    echo 'LANG="en_US.UTF-8"' >> /etc/locale.conf
+    echo 'LANG="en_GB.UTF-8"' >> /etc/locale.conf
     echo 'LC_COLLATE="C"' >> /etc/locale.conf
-    echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
+    echo "en_GB.UTF-8 UTF-8" >> /etc/locale.gen
     locale-gen
 }
 
 set_keymap() {
     echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
+    echo "FONT=ter-v132n" >> /etc/vconsole.conf
 }
 
 set_hosts() {
     local hostname="$1"; shift
 
     cat > /etc/hosts <<EOF
-127.0.0.1 localhost.localdomain localhost $hostname
-::1       localhost.localdomain localhost $hostname
+127.0.0.1	localhost
+::1		localhost
+127.0.1.1	$hostname.localdomain	$hostname
 EOF
 }
 
@@ -447,8 +450,9 @@ set_fstab() {
 
 /dev/vg00/swap none swap  sw                0 0
 /dev/vg00/root /    ext4  defaults,relatime 0 1
+/dev/mapper/home /home    ext4  defaults,relatime 0 2
 
-UUID=$boot_uuid /boot ext2 defaults,relatime 0 2
+#UUID=$boot_uuid /boot/efi  defaults,relatime 0 2
 EOF
 }
 
@@ -478,79 +482,13 @@ set_initcpio() {
 
 
     # Set MODULES with your video driver
+    cp /etc/mkinitcpio.conf /etc/mkinitcpio.conf.orig
     cat > /etc/mkinitcpio.conf <<EOF
-# vim:set ft=sh
-# MODULES
-# The following modules are loaded before any boot hooks are
-# run.  Advanced users may wish to specify all system modules
-# in this array.  For instance:
-#     MODULES="piix ide_disk reiserfs"
-MODULES="ext4 $vid"
-
-# BINARIES
-# This setting includes any additional binaries a given user may
-# wish into the CPIO image.  This is run last, so it may be used to
-# override the actual binaries included by a given hook
-# BINARIES are dependency parsed, so you may safely ignore libraries
+MODULES=($vid)
 BINARIES=""
-
-# FILES
-# This setting is similar to BINARIES above, however, files are added
-# as-is and are not parsed in any way.  This is useful for config files.
-# Some users may wish to include modprobe.conf for custom module options
-# like so:
-#    FILES="/etc/modprobe.d/modprobe.conf"
 FILES=""
-
-# HOOKS
-# This is the most important setting in this file.  The HOOKS control the
-# modules and scripts added to the image, and what happens at boot time.
-# Order is important, and it is recommended that you do not change the
-# order in which HOOKS are added.  Run 'mkinitcpio -H <hook name>' for
-# help on a given hook.
-# 'base' is _required_ unless you know precisely what you are doing.
-# 'udev' is _required_ in order to automatically load modules
-# 'filesystems' is _required_ unless you specify your fs modules in MODULES
-# Examples:
-##   This setup specifies all modules in the MODULES setting above.
-##   No raid, lvm2, or encrypted root is needed.
-#    HOOKS="base"
-#
-##   This setup will autodetect all modules for your system and should
-##   work as a sane default
-#    HOOKS="base udev autodetect pata scsi sata filesystems"
-#
-##   This is identical to the above, except the old ide subsystem is
-##   used for IDE devices instead of the new pata subsystem.
-#    HOOKS="base udev autodetect ide scsi sata filesystems"
-#
-##   This setup will generate a 'full' image which supports most systems.
-##   No autodetection is done.
-#    HOOKS="base udev pata scsi sata usb filesystems"
-#
-##   This setup assembles a pata mdadm array with an encrypted root FS.
-##   Note: See 'mkinitcpio -H mdadm' for more information on raid devices.
-#    HOOKS="base udev pata mdadm encrypt filesystems"
-#
-##   This setup loads an lvm2 volume group on a usb device.
-#    HOOKS="base udev usb lvm2 filesystems"
-#
-##   NOTE: If you have /usr on a separate partition, you MUST include the
-#    usr, fsck and shutdown hooks.
-HOOKS="base udev autodetect modconf block keymap keyboard $encrypt lvm2 resume filesystems fsck"
-
-# COMPRESSION
-# Use this to compress the initramfs image. By default, gzip compression
-# is used. Use 'cat' to create an uncompressed image.
-#COMPRESSION="gzip"
-#COMPRESSION="bzip2"
-#COMPRESSION="lzma"
-#COMPRESSION="xz"
-#COMPRESSION="lzop"
-
-# COMPRESSION_OPTIONS
-# Additional options for the compressor
-#COMPRESSION_OPTIONS=""
+#HOOKS="base udev autodetect modconf block keymap keyboard $encrypt lvm2 resume filesystems fsck"
+HOOKS=(base udev autodetect keyboard keymap consolefont modconf block $encrypt lvm2 filesystems fsck)
 EOF
 
     mkinitcpio -p linux
@@ -559,14 +497,14 @@ EOF
 set_daemons() {
     local tmp_on_tmpfs="$1"; shift
 
-    systemctl enable cronie.service cpupower.service ntpd.service slim.service
+    systemctl enable cronie.service tlp.service tlp-sleep.service ntpd.service
 
-    if [ -n "$WIRELESS_DEVICE" ]
-    then
-        systemctl enable net-auto-wired.service net-auto-wireless.service
-    else
-        systemctl enable dhcpcd@eth0.service
-    fi
+#    if [ -n "$WIRELESS_DEVICE" ]
+#    then
+#        systemctl enable net-auto-wired.service net-auto-wireless.service
+#    else
+#        systemctl enable dhcpcd@eth0.service
+#    fi
 
     if [ -z "$tmp_on_tmpfs" ]
     then
@@ -574,189 +512,24 @@ set_daemons() {
     fi
 }
 
-set_syslinux() {
-    local lvm_dev="$1"; shift
-
-    local lvm_uuid=$(get_uuid "$lvm_dev")
-
-    local crypt=""
-    if [ -n "$ENCRYPT_DRIVE" ]
-    then
-        # Load in resources
-        crypt="cryptdevice=/dev/disk/by-uuid/$lvm_uuid:lvm"
-    fi
-
-    cat > /boot/syslinux/syslinux.cfg <<EOF
-# Config file for Syslinux -
-# /boot/syslinux/syslinux.cfg
-#
-# Comboot modules:
-#   * menu.c32 - provides a text menu
-#   * vesamenu.c32 - provides a graphical menu
-#   * chain.c32 - chainload MBRs, partition boot sectors, Windows bootloaders
-#   * hdt.c32 - hardware detection tool
-#   * reboot.c32 - reboots the system
-#   * poweroff.com - shutdown the system
-#
-# To Use: Copy the respective files from /usr/lib/syslinux to /boot/syslinux.
-# If /usr and /boot are on the same file system, symlink the files instead
-# of copying them.
-#
-# If you do not use a menu, a 'boot:' prompt will be shown and the system
-# will boot automatically after 5 seconds.
-#
-# Please review the wiki: https://wiki.archlinux.org/index.php/Syslinux
-# The wiki provides further configuration examples
-
-DEFAULT arch
-PROMPT 0        # Set to 1 if you always want to display the boot: prompt 
-TIMEOUT 50
-# You can create syslinux keymaps with the keytab-lilo tool
-#KBDMAP de.ktl
-
-# Menu Configuration
-# Either menu.c32 or vesamenu32.c32 must be copied to /boot/syslinux 
-UI menu.c32
-#UI vesamenu.c32
-
-# Refer to http://syslinux.zytor.com/wiki/index.php/Doc/menu
-MENU TITLE Arch Linux
-#MENU BACKGROUND splash.png
-MENU COLOR border       30;44   #40ffffff #a0000000 std
-MENU COLOR title        1;36;44 #9033ccff #a0000000 std
-MENU COLOR sel          7;37;40 #e0ffffff #20ffffff all
-MENU COLOR unsel        37;44   #50ffffff #a0000000 std
-MENU COLOR help         37;40   #c0ffffff #a0000000 std
-MENU COLOR timeout_msg  37;40   #80ffffff #00000000 std
-MENU COLOR timeout      1;37;40 #c0ffffff #00000000 std
-MENU COLOR msg07        37;40   #90ffffff #a0000000 std
-MENU COLOR tabmsg       31;40   #30ffffff #00000000 std
-
-# boot sections follow
-#
-# TIP: If you want a 1024x768 framebuffer, add "vga=773" to your kernel line.
-#
-#-*
-
-LABEL arch
-	MENU LABEL Arch Linux
-	LINUX ../vmlinuz-linux
-	APPEND root=/dev/vg00/root ro $crypt resume=/dev/vg00/swap quiet
-	INITRD ../initramfs-linux.img
-
-LABEL archfallback
-	MENU LABEL Arch Linux Fallback
-	LINUX ../vmlinuz-linux
-	APPEND root=/dev/vg00/root ro $crypt resume=/dev/vg00/swap
-	INITRD ../initramfs-linux-fallback.img
-
-LABEL hdt
-        MENU LABEL HDT (Hardware Detection Tool)
-        COM32 hdt.c32
-
-LABEL reboot
-        MENU LABEL Reboot
-        COM32 reboot.c32
-
-LABEL off
-        MENU LABEL Power Off
-        COMBOOT poweroff.com
-EOF
-
-    syslinux-install_update -iam
-}
+# insert grub function here
 
 set_sudoers() {
+    cp /etc/sudoers /etc/sudoers.orig
     cat > /etc/sudoers <<EOF
-## sudoers file.
-##
-## This file MUST be edited with the 'visudo' command as root.
-## Failure to use 'visudo' may result in syntax or file permission errors
-## that prevent sudo from running.
-##
-## See the sudoers man page for the details on how to write a sudoers file.
-##
-
-##
-## Host alias specification
-##
-## Groups of machines. These may include host names (optionally with wildcards),
-## IP addresses, network numbers or netgroups.
-# Host_Alias	WEBSERVERS = www1, www2, www3
-
-##
-## User alias specification
-##
-## Groups of users.  These may consist of user names, uids, Unix groups,
-## or netgroups.
-# User_Alias	ADMINS = millert, dowdy, mikef
-
-##
-## Cmnd alias specification
-##
-## Groups of commands.  Often used to group related commands together.
-# Cmnd_Alias	PROCESSES = /usr/bin/nice, /bin/kill, /usr/bin/renice, \
-# 			    /usr/bin/pkill, /usr/bin/top
-
-##
-## Defaults specification
-##
-## You may wish to keep some of the following environment variables
-## when running commands via sudo.
-##
-## Locale settings
-# Defaults env_keep += "LANG LANGUAGE LINGUAS LC_* _XKB_CHARSET"
-##
-## Run X applications through sudo; HOME is used to find the
-## .Xauthority file.  Note that other programs use HOME to find   
-## configuration files and this may lead to privilege escalation!
-# Defaults env_keep += "HOME"
-##
-## X11 resource path settings
-# Defaults env_keep += "XAPPLRESDIR XFILESEARCHPATH XUSERFILESEARCHPATH"
-##
-## Desktop path settings
-# Defaults env_keep += "QTDIR KDEDIR"
-##
-## Allow sudo-run commands to inherit the callers' ConsoleKit session
-# Defaults env_keep += "XDG_SESSION_COOKIE"
-##
-## Uncomment to enable special input methods.  Care should be taken as
-## this may allow users to subvert the command being run via sudo.
-# Defaults env_keep += "XMODIFIERS GTK_IM_MODULE QT_IM_MODULE QT_IM_SWITCHER"
-##
-## Uncomment to enable logging of a command's output, except for
-## sudoreplay and reboot.  Use sudoreplay to play back logged sessions.
-# Defaults log_output
-# Defaults!/usr/bin/sudoreplay !log_output
-# Defaults!/usr/local/bin/sudoreplay !log_output
-# Defaults!/sbin/reboot !log_output
-
-##
-## Runas alias specification
-##
-
 ##
 ## User privilege specification
 ##
 root ALL=(ALL) ALL
 
 ## Uncomment to allow members of group wheel to execute any command
-%wheel ALL=(ALL) ALL
+#%wheel ALL=(ALL) ALL
 
 ## Same thing without a password
-# %wheel ALL=(ALL) NOPASSWD: ALL
-
-## Uncomment to allow members of group sudo to execute any command
-# %sudo ALL=(ALL) ALL
-
-## Uncomment to allow any user to run sudo if they know the password
-## of the user they are running the command as (root by default).
-# Defaults targetpw  # Ask for the password of the target user
-# ALL ALL=(ALL) ALL  # WARNING: only use this together with 'Defaults targetpw'
+%wheel ALL=(ALL) NOPASSWD: ALL
 
 %rfkill ALL=(ALL) NOPASSWD: /usr/sbin/rfkill
-%network ALL=(ALL) NOPASSWD: /usr/bin/netcfg, /usr/bin/wifi-menu
+#%network ALL=(ALL) NOPASSWD: /usr/bin/netcfg, /usr/bin/wifi-menu
 
 ## Read drop-in files from /etc/sudoers.d
 ## (the '#' here does not indicate a comment)
@@ -766,130 +539,36 @@ EOF
     chmod 440 /etc/sudoers
 }
 
-set_slim() {
-    cat > /etc/slim.conf <<EOF
-# Path, X server and arguments (if needed)
-# Note: -xauth $authfile is automatically appended
-default_path        /bin:/usr/bin:/usr/local/bin
-default_xserver     /usr/bin/X
-xserver_arguments -nolisten tcp vt07
 
-# Commands for halt, login, etc.
-halt_cmd            /sbin/poweroff
-reboot_cmd          /sbin/reboot
-console_cmd         /usr/bin/xterm -C -fg white -bg black +sb -T "Console login" -e /bin/sh -c "/bin/cat /etc/issue; exec /bin/login"
-suspend_cmd         /usr/bin/systemctl hybrid-sleep
-
-# Full path to the xauth binary
-xauth_path         /usr/bin/xauth 
-
-# Xauth file for server
-authfile           /var/run/slim.auth
-
-# Activate numlock when slim starts. Valid values: on|off
-# numlock             on
-
-# Hide the mouse cursor (note: does not work with some WMs).
-# Valid values: true|false
-# hidecursor          false
-
-# This command is executed after a succesful login.
-# you can place the %session and %theme variables
-# to handle launching of specific commands in .xinitrc
-# depending of chosen session and slim theme
+#set_netcfg() {
+#    cat > /etc/network.d/wired <<EOF
+#CONNECTION='ethernet'
+#DESCRIPTION='Ethernet with DHCP'
+#INTERFACE='eth0'
+#IP='dhcp'
+#EOF
 #
-# NOTE: if your system does not have bash you need
-# to adjust the command according to your preferred shell,
-# i.e. for freebsd use:
-# login_cmd           exec /bin/sh - ~/.xinitrc %session
-# login_cmd           exec /bin/bash -login ~/.xinitrc %session
-login_cmd           exec /bin/zsh -l ~/.xinitrc %session
-
-# Commands executed when starting and exiting a session.
-# They can be used for registering a X11 session with
-# sessreg. You can use the %user variable
+#    chmod 600 /etc/network.d/wired
 #
-# sessionstart_cmd	some command
-# sessionstop_cmd	some command
-
-# Start in daemon mode. Valid values: yes | no
-# Note that this can be overriden by the command line
-# options "-d" and "-nodaemon"
-# daemon	yes
-
-# Available sessions (first one is the default).
-# The current chosen session name is replaced in the login_cmd
-# above, so your login command can handle different sessions.
-# see the xinitrc.sample file shipped with slim sources
-sessions            foo
-
-# Executed when pressing F11 (requires imagemagick)
-#screenshot_cmd      import -window root /slim.png
-
-# welcome message. Available variables: %host, %domain
-welcome_msg         %host
-
-# Session message. Prepended to the session name when pressing F1
-# session_msg         Session: 
-
-# shutdown / reboot messages
-shutdown_msg       The system is shutting down...
-reboot_msg         The system is rebooting...
-
-# default user, leave blank or remove this line
-# for avoid pre-loading the username.
-#default_user        simone
-
-# Focus the password field on start when default_user is set
-# Set to "yes" to enable this feature
-#focus_password      no
-
-# Automatically login the default user (without entering
-# the password. Set to "yes" to enable this feature
-#auto_login          no
-
-# current theme, use comma separated list to specify a set to 
-# randomly choose from
-#current_theme       default
-current_theme       archlinux-simplyblack
-
-# Lock file
-lockfile            /run/lock/slim.lock
-
-# Log file
-logfile             /var/log/slim.log
-EOF
-}
-
-set_netcfg() {
-    cat > /etc/network.d/wired <<EOF
-CONNECTION='ethernet'
-DESCRIPTION='Ethernet with DHCP'
-INTERFACE='eth0'
-IP='dhcp'
-EOF
-
-    chmod 600 /etc/network.d/wired
-
-    cat > /etc/conf.d/netcfg <<EOF
-# Enable these netcfg profiles at boot time.
-#   - prefix an entry with a '@' to background its startup
-#   - set to 'last' to restore the profiles running at the last shutdown
-#   - set to 'menu' to present a menu (requires the dialog package)
-# Network profiles are found in /etc/network.d
-NETWORKS=()
-
-# Specify the name of your wired interface for net-auto-wired
-WIRED_INTERFACE="eth0"
-
-# Specify the name of your wireless interface for net-auto-wireless
-WIRELESS_INTERFACE="$WIRELESS_DEVICE"
-
-# Array of profiles that may be started by net-auto-wireless.
-# When not specified, all wireless profiles are considered.
-#AUTO_PROFILES=("profile1" "profile2")
-EOF
-}
+#    cat > /etc/conf.d/netcfg <<EOF
+## Enable these netcfg profiles at boot time.
+##   - prefix an entry with a '@' to background its startup
+##   - set to 'last' to restore the profiles running at the last shutdown
+##   - set to 'menu' to present a menu (requires the dialog package)
+## Network profiles are found in /etc/network.d
+#NETWORKS=()
+#
+## Specify the name of your wired interface for net-auto-wired
+#WIRED_INTERFACE="eth0"
+#
+## Specify the name of your wireless interface for net-auto-wireless
+#WIRELESS_INTERFACE="$WIRELESS_DEVICE"
+#
+## Array of profiles that may be started by net-auto-wireless.
+## When not specified, all wireless profiles are considered.
+##AUTO_PROFILES=("profile1" "profile2")
+#EOF
+#}
 
 set_root_password() {
     local password="$1"; shift
@@ -901,7 +580,8 @@ create_user() {
     local name="$1"; shift
     local password="$1"; shift
 
-    useradd -m -s /bin/zsh -G adm,systemd-journal,wheel,rfkill,games,network,video,audio,optical,floppy,storage,scanner,power,adbusers,wireshark "$name"
+    #useradd -m -s /bin/zsh -G adm,systemd-journal,wheel,rfkill,games,network,video,audio,optical,floppy,storage,scanner,power,adbusers,wireshark "$name"
+    useradd -m -s /bin/zsh -G adm,systemd-journal,wheel,rfkill,games,network,video,audio,optical,floppy,storage,scanner,power,wireshark "$name"
     echo -en "$password\n$password" | passwd "$name"
 }
 
