@@ -60,13 +60,13 @@ USER_NAME='user'
 USER_PASSWORD='a'
 
 # System timezone.
-TIMEZONE='America/New_York'
+TIMEZONE='Europe/London'
 
 # Have /tmp on a tmpfs or not.  Leave blank to disable.
 # Only leave this blank on systems with very little RAM.
 TMP_ON_TMPFS='TRUE'
 
-KEYMAP='us'
+KEYMAP='gb'
 # KEYMAP='dvorak'
 
 # Choose your video driver
@@ -84,9 +84,17 @@ WIRELESS_DEVICE="wlan0"
 # For tc4200's
 #WIRELESS_DEVICE="eth1"
 
+EFI_SIZE="512MiB"
+ROOT_SIZE="8000MiB"
+HOME_SIZE="100%"
+SWAP_SIZE="2G"
+
+
 setup() {
-    local boot_dev="$DRIVE"1
+    #local boot_dev="$DRIVE"1
+    local efi_dev="$DRIVE"1
     local lvm_dev="$DRIVE"2
+    local home_dev="$DRIVE"3
 
     echo 'Creating partitions'
     partition_drive "$DRIVE"
@@ -104,20 +112,21 @@ setup() {
         fi
 
         echo 'Encrypting partition'
-        encrypt_drive "$lvm_dev" "$DRIVE_PASSPHRASE" lvm
+        encrypt_drive "$lvm_dev" "$home_dev" "$DRIVE_PASSPHRASE"
 
     else
         local lvm_part="$lvm_dev"
+        local home_part="$home_dev"
     fi
 
     echo 'Setting up LVM'
     setup_lvm "$lvm_part" vg00
 
     echo 'Formatting filesystems'
-    format_filesystems "$boot_dev"
+    format_filesystems "$efi_dev"
 
     echo 'Mounting filesystems'
-    mount_filesystems "$boot_dev"
+    mount_filesystems "$efi_dev"
 
     echo 'Installing base system'
     install_base
@@ -138,8 +147,9 @@ setup() {
 }
 
 configure() {
-    local boot_dev="$DRIVE"1
+    local efi_dev="$DRIVE"1
     local lvm_dev="$DRIVE"2
+    local home_dev="$DRIVE"3
 
     echo 'Installing additional packages'
     install_packages
@@ -227,22 +237,24 @@ configure() {
 partition_drive() {
     local dev="$1"; shift
 
-    # 100 MB /boot partition, everything else under LVM
+    # 512 MB /efi partition, everything else under LVM
     parted -s "$dev" \
-        mklabel msdos \
-        mkpart primary ext2 1 100M \
-        mkpart primary ext2 100M 100% \
-        set 1 boot on \
-        set 2 LVM on
+        mklabel gpt \
+        mkpart primary fat32 1 1MiB "$EFI_SIZE" \
+        mkpart primary ext4 "$EFI_SIZE" "$ROOT_SIZE" \
+        mkpart primary ext4 "$ROOT_SIZE" "$HOME_SIZE" \
+        set 1 esp on \
 }
 
 encrypt_drive() {
-    local dev="$1"; shift
+    local devroot="$1"; shift
+    local devhome="$1"; shift
     local passphrase="$1"; shift
-    local name="$1"; shift
 
-    echo -en "$passphrase" | cryptsetup -c aes-xts-plain -y -s 512 luksFormat "$dev"
-    echo -en "$passphrase" | cryptsetup luksOpen "$dev" lvm
+    echo -en "$passphrase" | cryptsetup --cipher aes-xts-plain64 --verify-passphrase --key-size 512 --hash sha256 --iter-time 2000 --use-random --type luks1 luksFormat "$devroot"
+    echo -en "$passphrase" | cryptsetup --cipher aes-xts-plain64 --verify-passphrase --key-size 512 --hash sha256 --iter-time 2000 --use-random --type luks2 luksFormat "$devhome"
+    echo -en "$passphrase" | cryptsetup luksOpen "$devroot" lvm
+    echo -en "$passphrase" | cryptsetup luksOpen "$devhome" home
 }
 
 setup_lvm() {
@@ -252,8 +264,8 @@ setup_lvm() {
     pvcreate "$partition"
     vgcreate "$volgroup" "$partition"
 
-    # Create a 1GB swap partition
-    lvcreate -C y -L1G "$volgroup" -n swap
+    # Create a swap partition
+    lvcreate -C y -L "$SWAP_SIZE" "$volgroup" -n swap
 
     # Use the rest of the space for root
     lvcreate -l '+100%FREE' "$volgroup" -n root
@@ -265,8 +277,9 @@ setup_lvm() {
 format_filesystems() {
     local boot_dev="$1"; shift
 
-    mkfs.ext2 -L boot "$boot_dev"
+    mkfs.vfat -F32 -n efi "$boot_dev"
     mkfs.ext4 -L root /dev/vg00/root
+    mkfs.ext4 -L home /dev/mapper/home
     mkswap /dev/vg00/swap
 }
 
@@ -274,16 +287,18 @@ mount_filesystems() {
     local boot_dev="$1"; shift
 
     mount /dev/vg00/root /mnt
-    mkdir /mnt/boot
-    mount "$boot_dev" /mnt/boot
+    mkdir -p /mnt/boot/efi
+    mkdir /mnt/home
+    mount "$boot_dev" /mnt/boot/efi
+    mount /dev/mapper/home /mnt/home
     swapon /dev/vg00/swap
 }
 
 install_base() {
-    echo 'Server = http://mirrors.kernel.org/archlinux/$repo/os/$arch' >> /etc/pacman.d/mirrorlist
+    echo 'Server = https://mirrors.kernel.org/archlinux/$repo/os/$arch' >> /etc/pacman.d/mirrorlist
 
-    pacstrap /mnt base base-devel
-    pacstrap /mnt syslinux
+    pacstrap /mnt base base-devel linux linux-headers
+    pacstrap /mnt grub efibootmgr 
 }
 
 unmount_filesystems() {
@@ -301,40 +316,41 @@ install_packages() {
     local packages=''
 
     # General utilities/libraries
-    packages+=' alsa-utils aspell-en chromium cpupower gvim mlocate net-tools ntp openssh p7zip pkgfile powertop python python2 rfkill rsync sudo unrar unzip wget zip systemd-sysvcompat zsh grml-zsh-config'
+    packages+=' alsa-utils pulseaudio pulseaudio-alsa aspell-en chromium firefox tlp mvim net-tools ntp openssh p7zip pkgfile python python2 rfkill rsync sudo unrar unzip wget zip zsh grml-zsh-config pinentry'
 
     # Development packages
-    packages+=' apache-ant cmake gdb git maven mercurial subversion tcpdump valgrind wireshark-gtk'
+    packages+=' cmake gdb git tcpdump valgrind wireshark-qt'
 
     # Netcfg
     if [ -n "$WIRELESS_DEVICE" ]
     then
-        packages+=' netcfg ifplugd dialog wireless_tools wpa_actiond wpa_supplicant'
+        packages+=' ifplugd dialog wireless_tools wpa_supplicant'
     fi
 
     # Java stuff
-    packages+=' icedtea-web-java7 jdk7-openjdk jre7-openjdk'
+    #packages+=' icedtea-web-java7 jdk7-openjdk jre7-openjdk'
 
     # Libreoffice
-    packages+=' libreoffice-calc libreoffice-en-US libreoffice-gnome libreoffice-impress libreoffice-writer hunspell-en hyphen-en mythes-en'
+    #packages+=' libreoffice-calc libreoffice-en-US libreoffice-gnome libreoffice-impress libreoffice-writer hunspell-en hyphen-en mythes-en'
 
     # Misc programs
-    packages+=' mplayer pidgin vlc xscreensaver gparted dosfstools ntfsprogs'
+    packages+=' mpv vlc gparted dosfstools ntfs-3g'
 
     # Xserver
-    packages+=' xorg-apps xorg-server xorg-xinit xterm'
+    #packages+=' xorg-apps xorg-server xorg-xinit xterm'
+    packages+=' xdg-utils xorg-server xorg-server-common xorg-apps xorg-xinit xterm'
 
     # Slim login manager
-    packages+=' slim archlinux-themes-slim'
+    #packages+=' slim archlinux-themes-slim'
 
     # Fonts
-    packages+=' ttf-dejavu ttf-liberation'
+    packages+=' ttf-dejavu ttf-liberation terminus-font ttf-font-awesome ttf-ubuntu-font-family'
 
     # On Intel processors
     packages+=' intel-ucode'
 
     # For laptops
-    packages+=' xf86-input-synaptics'
+    packages+=' libinput xf86-input-libinput'
 
     # Extra packages for tc4200 tablet
     #packages+=' ipw2200-fw xf86-input-wacom'
