@@ -66,7 +66,7 @@ TIMEZONE='Europe/London'
 # Only leave this blank on systems with very little RAM.
 TMP_ON_TMPFS='TRUE'
 
-KEYMAP='gb'
+KEYMAP='uk'
 # KEYMAP='dvorak'
 
 # Choose your video driver
@@ -319,7 +319,7 @@ install_packages() {
     local packages=''
 
     # General utilities/libraries
-    packages+=' alsa-utils pulseaudio pulseaudio-alsa aspell-en chromium firefox tlp vim net-tools ntp openssh p7zip pkgfile python python2 rfkill rsync sudo unrar unzip wget zip zsh grml-zsh-config pinentry mlocate cryptsetup lvm2 linux-firmware cronie'
+    packages+=' alsa-utils pulseaudio pulseaudio-alsa aspell-en chromium firefox tlp vim net-tools ntp openssh p7zip pkgfile python python2 rfkill rsync sudo unrar unzip wget zip zsh grml-zsh-config pinentry mlocate cryptsetup lvm2 linux-firmware cronie intel-ucode dhcpcd networkmanager nm-connection-editor network-manager-applet'
 
     # Development packages
     packages+=' cmake curl gdb git tcpdump valgrind wireshark-qt'
