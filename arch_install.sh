@@ -1,16 +1,16 @@
 #!/bin/bash
 # Copyright (c) 2012 Tom Wambold
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -71,13 +71,15 @@ KEYMAP='gb'
 
 # Choose your video driver
 # For Intel
-VIDEO_DRIVER="i915"
+#VIDEO_DRIVER="i915"
 # For nVidia
 #VIDEO_DRIVER="nouveau"
 # For ATI
 #VIDEO_DRIVER="radeon"
 # For generic stuff
 #VIDEO_DRIVER="vesa"
+# For virtualbox
+VIDEO_DRIVER="vbox"
 
 # Wireless device, leave blank to not use wireless and use DHCP instead.
 WIRELESS_DEVICE="wlan0"
@@ -85,7 +87,7 @@ WIRELESS_DEVICE="wlan0"
 #WIRELESS_DEVICE="eth1"
 
 EFI_SIZE="512MiB"
-ROOT_SIZE="8000MiB"
+ROOT_SIZE="14000MiB"
 HOME_SIZE="100%"
 SWAP_SIZE="2G"
 
@@ -154,11 +156,14 @@ configure() {
     echo 'Installing additional packages'
     install_packages
 
+    echo 'Creating initial user'
+    create_user "$USER_NAME" "$USER_PASSWORD"
+    
     echo 'Installing yay'
     install_yay
 
-    echo 'Installing AUR packages'
-    install_aur_packages
+    #echo 'Installing AUR packages'
+    #install_aur_packages
 
     echo 'Clearing package tarballs'
     clean_packages
@@ -194,19 +199,19 @@ configure() {
     set_daemons "$TMP_ON_TMPFS"
 
     echo 'Configuring bootloader'
-    set_syslinux "$lvm_dev"
+    set_grub "$lvm_dev"
 
     echo 'Configuring sudo'
     set_sudoers
 
-    echo 'Configuring slim'
-    set_slim
+    #echo 'Configuring slim'
+    #set_slim
 
-    if [ -n "$WIRELESS_DEVICE" ]
-    then
-        echo 'Configuring netcfg'
-        set_netcfg
-    fi
+    #if [ -n "$WIRELESS_DEVICE" ]
+    #then
+    #    echo 'Configuring netcfg'
+    #    set_netcfg
+    #fi
 
     if [ -z "$ROOT_PASSWORD" ]
     then
@@ -225,13 +230,11 @@ configure() {
         read USER_PASSWORD
         stty echo
     fi
-    echo 'Creating initial user'
-    create_user "$USER_NAME" "$USER_PASSWORD"
 
     echo 'Building locate database'
     update_locate
 
-    rm /setup.sh
+    mv /setup.sh /root/setup.sh
 }
 
 partition_drive() {
@@ -240,10 +243,10 @@ partition_drive() {
     # 512 MB /efi partition, everything else under LVM
     parted -s "$dev" \
         mklabel gpt \
-        mkpart primary fat32 1 1MiB "$EFI_SIZE" \
+        mkpart primary fat32 1MiB "$EFI_SIZE" \
         mkpart primary ext4 "$EFI_SIZE" "$ROOT_SIZE" \
         mkpart primary ext4 "$ROOT_SIZE" "$HOME_SIZE" \
-        set 1 esp on \
+        set 1 esp on
 }
 
 encrypt_drive() {
@@ -298,7 +301,7 @@ install_base() {
     echo 'Server = https://mirrors.kernel.org/archlinux/$repo/os/$arch' >> /etc/pacman.d/mirrorlist
 
     pacstrap /mnt base base-devel linux linux-headers
-    pacstrap /mnt grub efibootmgr 
+    pacstrap /mnt grub efibootmgr
 }
 
 unmount_filesystems() {
@@ -316,7 +319,7 @@ install_packages() {
     local packages=''
 
     # General utilities/libraries
-    packages+=' alsa-utils pulseaudio pulseaudio-alsa aspell-en chromium firefox tlp mvim net-tools ntp openssh p7zip pkgfile python python2 rfkill rsync sudo unrar unzip wget zip zsh grml-zsh-config pinentry'
+    packages+=' alsa-utils pulseaudio pulseaudio-alsa aspell-en chromium firefox tlp vim net-tools ntp openssh p7zip pkgfile python python2 rfkill rsync sudo unrar unzip wget zip zsh grml-zsh-config pinentry mlocate cryptsetup lvm2 linux-firmware cronie'
 
     # Development packages
     packages+=' cmake curl gdb git tcpdump valgrind wireshark-qt'
@@ -340,6 +343,8 @@ install_packages() {
     #packages+=' xorg-apps xorg-server xorg-xinit xterm'
     packages+=' xdg-utils xorg-server xorg-server-common xorg-apps xorg-xinit xterm'
 
+    # Virtualbox
+    packages+=' virtualbox-guest-dkms virtualbox-guest-utils xf86-video-vmware'
     # Slim login manager
     #packages+=' slim archlinux-themes-slim'
 
@@ -367,17 +372,27 @@ install_packages() {
     elif [ "$VIDEO_DRIVER" = "vesa" ]
     then
         packages+=' xf86-video-vesa'
+    elif [ "$VIDEO_DRIVER" = "vbox" ]
+    then
+        packages+=' xf86-video-vmware'
     fi
 
     pacman -Sy --needed --noconfirm $packages
 }
 
 install_yay() {
-    mkdir /foo
+    rm -rf /foo
+    mkdir -p /foo
+    chown -R $USER_NAME:wheel foo
     cd /foo
     curl https://aur.archlinux.org/cgit/aur.git/snapshot/yay.tar.gz | tar xzf -
+
+    chown -R $USER_NAME:wheel yay
     cd yay
-    makepkg -si --noconfirm --asroot
+    su - $USER_NAME -c  'cd /foo/yay && makepkg --noconfirm' 
+    # yay depends
+    pacman --needed --noconfirm -Sy go
+    pacman -U *.pkg.tar.xz --needed --noconfirm 
 
     cd /
     rm -rf /foo
@@ -423,16 +438,16 @@ set_locale() {
 
 set_keymap() {
     echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
-    echo "FONT=ter-v132n" >> /etc/vconsole.conf
+    echo "FONT=ter-132n" >> /etc/vconsole.conf
 }
 
 set_hosts() {
     local hostname="$1"; shift
 
     cat > /etc/hosts <<EOF
-127.0.0.1	localhost
-::1		localhost
-127.0.1.1	$hostname.localdomain	$hostname
+127.0.0.1       localhost
+::1             localhost
+127.0.1.1       $hostname.localdomain   $hostname
 EOF
 }
 
@@ -513,6 +528,30 @@ set_daemons() {
 }
 
 # insert grub function here
+set_grub() {
+    local rootdev="$1"; shift
+    local rootuuid=$(get_uuid "$rootdev")
+    cp /etc/default/grub /etc/default/grub.orig
+    cat > /etc/default/grub <<EOF
+# GRUB boot loader configuration
+
+GRUB_DEFAULT=0
+GRUB_TIMEOUT=5
+GRUB_DISTRIBUTOR="Arch"
+GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 cryptdevice=UUID=$rootuuid:lvm root=/dev/vg00/root"
+GRUB_CMDLINE_LINUX=""
+GRUB_PRELOAD_MODULES="part_gpt part_msdos"
+GRUB_ENABLE_CRYPTODISK=y
+GRUB_TIMEOUT_STYLE=menu
+GRUB_TERMINAL_INPUT=console
+GRUB_GFXMODE=auto
+GRUB_GFXPAYLOAD_LINUX=keep
+EOF
+
+#    grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch --boot-directory=/boot --recheck --debug
+    grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch --boot-directory=/boot --recheck --debug --removable
+    grub-mkconfig -o /boot/grub/grub.cfg
+}
 
 set_sudoers() {
     cp /etc/sudoers /etc/sudoers.orig
@@ -579,10 +618,14 @@ set_root_password() {
 create_user() {
     local name="$1"; shift
     local password="$1"; shift
-
+    if id "$USER_NAME" >/dev/null 2>&1; then
+        echo "user exists"
+    else
+        echo "user does not exist"
+        useradd -m -s /bin/zsh -G adm,systemd-journal,wheel,rfkill,games,network,video,audio,optical,floppy,storage,scanner,power,wireshark "$name"
+        echo -en "$password\n$password" | passwd "$name"
+    fi
     #useradd -m -s /bin/zsh -G adm,systemd-journal,wheel,rfkill,games,network,video,audio,optical,floppy,storage,scanner,power,adbusers,wireshark "$name"
-    useradd -m -s /bin/zsh -G adm,systemd-journal,wheel,rfkill,games,network,video,audio,optical,floppy,storage,scanner,power,wireshark "$name"
-    echo -en "$password\n$password" | passwd "$name"
 }
 
 update_locate() {
@@ -590,7 +633,7 @@ update_locate() {
 }
 
 get_uuid() {
-    blkid -o export "$1" | grep UUID | awk -F= '{print $2}'
+    blkid -o value -s UUID "$1"
 }
 
 set -ex
@@ -601,3 +644,6 @@ then
 else
     setup
 fi
+
+echo "banana banana"
+
