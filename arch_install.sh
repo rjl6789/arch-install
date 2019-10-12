@@ -192,6 +192,12 @@ configure() {
     echo 'Setting initial modules to load'
     set_modules_load
 
+    echo 'Setting crypttab and generating keys for enctypted boot'
+    if [ -n "$ENCRYPT_DRIVE" ]
+    then
+       set_encrypt_boot $lvm_dev $home_dev $DRIVE_PASSPHRASE
+    fi
+
     echo 'Configuring initial ramdisk'
     set_initcpio
 
@@ -258,6 +264,7 @@ encrypt_drive() {
     echo -en "$passphrase" | cryptsetup --cipher aes-xts-plain64 --verify-passphrase --key-size 512 --hash sha256 --iter-time 2000 --use-random --type luks2 luksFormat "$devhome"
     echo -en "$passphrase" | cryptsetup luksOpen "$devroot" lvm
     echo -en "$passphrase" | cryptsetup luksOpen "$devhome" home
+
 }
 
 setup_lvm() {
@@ -300,7 +307,7 @@ mount_filesystems() {
 install_base() {
     echo 'Server = https://mirrors.kernel.org/archlinux/$repo/os/$arch' >> /etc/pacman.d/mirrorlist
 
-    pacstrap /mnt base base-devel linux linux-headers
+    pacstrap /mnt base base-devel linux linux-headers linux-firmware
     pacstrap /mnt grub efibootmgr
 }
 
@@ -319,10 +326,12 @@ install_packages() {
     local packages=''
 
     # General utilities/libraries
-    packages+=' alsa-utils pulseaudio pulseaudio-alsa aspell-en chromium firefox tlp vim net-tools ntp openssh p7zip pkgfile python python2 rfkill rsync sudo unrar unzip wget zip zsh grml-zsh-config pinentry mlocate cryptsetup lvm2 linux-firmware cronie intel-ucode dhcpcd networkmanager nm-connection-editor network-manager-applet'
+    packages+=' alsa-utils pulseaudio pulseaudio-alsa aspell-en chromium firefox tlp vim ntp openssh p7zip pkgfile python python2 rfkill rsync sudo unrar unzip wget zip zsh grml-zsh-config pinentry mlocate cryptsetup lvm2 cronie intel-ucode dhcpcd networkmanager nm-connection-editor network-manager-applet man-db man-pages texinfo iputils iproute2'
+
+    # note: net-tools depracated so removed from list above and replaced with iproute2 (which should be part of base)
 
     # Development packages
-    packages+=' cmake curl gdb git tcpdump valgrind wireshark-qt'
+    packages+=' cmake curl gdb git tcpdump valgrind wireshark-qt go'
 
     # Netcfg
     if [ -n "$WIRELESS_DEVICE" ]
@@ -475,6 +484,26 @@ set_modules_load() {
     echo 'microcode' > /etc/modules-load.d/intel-ucode.conf
 }
 
+set_encrypt_boot() {
+    local rootdev="$1"; shift
+    local homedev="$1"; shift
+    local passphrase="$1"; shift
+    local homeuuid=$(get_uuid "$homedev")
+    # get some entropy
+    pacman -S --needed --noconfirm haveged
+    systemctl start haveged.service
+    dd bs=512 count=4 if=/dev/random of=/root/lvm.keyfile iflag=fullblock
+    dd bs=512 count=4 if=/dev/random of=/root/home.keyfile iflag=fullblock
+    chmod 000 /root/lvm.keyfile
+    chmod 000 /root/home.keyfile
+    chmod 600 /boot/initramfs-linux*
+    echo -en "$passphrase" | cryptsetup -v luksAddKey "$rootdev" /root/lvm.keyfile
+    echo -en "$passphrase" | cryptsetup -v luksAddKey "$homedev" /root/home.keyfile
+#    sed -i '/FILES=/c\FILES=(/root/lvm.keyfile /root/home.keyfile)' /etc/mkinitcpio.conf
+    echo "home     UUID=$homeuuid     /root/home.keyfile     luks" >> /etc/crypttab
+
+}
+
 set_initcpio() {
     local vid
 
@@ -501,7 +530,7 @@ set_initcpio() {
     cat > /etc/mkinitcpio.conf <<EOF
 MODULES=($vid)
 BINARIES=""
-FILES=""
+FILES="/root/lvm.keyfile /root/home.keyfile"
 #HOOKS="base udev autodetect modconf block keymap keyboard $encrypt lvm2 resume filesystems fsck"
 HOOKS=(base udev autodetect keyboard keymap consolefont modconf block $encrypt lvm2 filesystems fsck)
 EOF
@@ -521,6 +550,7 @@ set_daemons() {
 #        systemctl enable dhcpcd@eth0.service
 #    fi
 
+    systemctl enable NetworkManager.service
     if [ -z "$tmp_on_tmpfs" ]
     then
         systemctl mask tmp.mount
@@ -538,7 +568,7 @@ set_grub() {
 GRUB_DEFAULT=0
 GRUB_TIMEOUT=5
 GRUB_DISTRIBUTOR="Arch"
-GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 cryptdevice=UUID=$rootuuid:lvm root=/dev/vg00/root"
+GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 cryptdevice=UUID=$rootuuid:lvm cryptkey=rootfs:/root/lvm.keyfile root=/dev/vg00/root"
 GRUB_CMDLINE_LINUX=""
 GRUB_PRELOAD_MODULES="part_gpt part_msdos"
 GRUB_ENABLE_CRYPTODISK=y
