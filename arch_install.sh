@@ -533,6 +533,8 @@ set_daemons() {
 #    fi
 
     systemctl enable NetworkManager.service
+    systemctl enable lightdm.service
+
     if [ -z "$tmp_on_tmpfs" ]
     then
         systemctl mask tmp.mount
