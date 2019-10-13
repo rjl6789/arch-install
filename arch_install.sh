@@ -338,7 +338,13 @@ install_packages() {
     packages+=' libinput xf86-input-libinput'
 
     # General utilities/libraries
-    packages+=' alsa-utils pulseaudio pulseaudio-alsa aspell-en chromium firefox tlp vim ntp openssh p7zip pkgfile python python2 rfkill rsync sudo unrar unzip wget zip zsh grml-zsh-config pinentry mlocate cryptsetup lvm2 cronie man-db man-pages texinfo htop lsof strace screenfetch dunst lxqt-policykit dex menu-cache youtube-dl ranger gvfs gvfs-smb gvfs-nfs pavucontrol xdg-user-dirs'
+    packages+=' alsa-utils pulseaudio pulseaudio-alsa aspell-en chromium firefox tlp vim ntp openssh p7zip pkgfile python python2 rfkill rsync sudo unrar unzip wget zip zsh grml-zsh-config pinentry mlocate cryptsetup lvm2 cronie man-db man-pages texinfo htop lsof strace screenfetch dunst dex menu-cache youtube-dl ranger gvfs gvfs-smb gvfs-nfs pavucontrol xdg-user-dirs'
+
+    # terminal
+    packages+=' termite'
+
+    # Policy kit graphical 
+    packages+=' mate-polkit'
 
     # Fonts
     packages+=' ttf-dejavu ttf-liberation terminus-font ttf-font-awesome ttf-ubuntu-font-family'
