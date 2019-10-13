@@ -41,6 +41,9 @@
 # Drive to install to.
 DRIVE='/dev/sda'
 
+# Is this a virtual box build - leave blank if not
+VIRTUALBOX='TRUE'
+
 # Hostname of the installed machine.
 HOSTNAME='host100'
 
@@ -325,19 +328,30 @@ unmount_filesystems() {
 install_packages() {
     local packages=''
 
+    # Xserver
+    packages+=' xdg-utils xorg-server xorg-server-common xorg-apps xorg-xinit xterm'
+
+    # On Intel processors
+    packages+=' intel-ucode'
+
+    # input devices
+    packages+=' libinput xf86-input-libinput'
+
     # General utilities/libraries
-    packages+=' alsa-utils pulseaudio pulseaudio-alsa aspell-en chromium firefox tlp vim ntp openssh p7zip pkgfile python python2 rfkill rsync sudo unrar unzip wget zip zsh grml-zsh-config pinentry mlocate cryptsetup lvm2 cronie intel-ucode dhcpcd networkmanager nm-connection-editor network-manager-applet man-db man-pages texinfo iputils iproute2'
+    packages+=' alsa-utils pulseaudio pulseaudio-alsa aspell-en chromium firefox tlp vim ntp openssh p7zip pkgfile python python2 rfkill rsync sudo unrar unzip wget zip zsh grml-zsh-config pinentry mlocate cryptsetup lvm2 cronie man-db man-pages texinfo htop lsof strace screenfetch dunst lxqt-policykit dex menu-cache youtube-dl ranger gvfs gvfs-smb gvfs-nfs pavucontrol xdg-user-dirs'
+
+    # Fonts
+    packages+=' ttf-dejavu ttf-liberation terminus-font ttf-font-awesome ttf-ubuntu-font-family'
 
     # note: net-tools depracated so removed from list above and replaced with iproute2 (which should be part of base)
 
     # Development packages
-    packages+=' cmake curl gdb git tcpdump valgrind wireshark-qt go'
+    packages+=' cmake wget curl diffutils gdb git tcpdump valgrind wireshark-qt go'
 
     # Netcfg
-    if [ -n "$WIRELESS_DEVICE" ]
-    then
-        packages+=' ifplugd dialog wireless_tools wpa_supplicant'
-    fi
+    packages+=' dhcpcd networkmanager nm-connection-editor network-manager-applet iputils iproute2'
+    # Wireless
+    packages+=' ifplugd dialog wireless_tools wpa_supplicant'
 
     # Java stuff
     #packages+=' icedtea-web-java7 jdk7-openjdk jre7-openjdk'
@@ -348,23 +362,18 @@ install_packages() {
     # Misc programs
     packages+=' mpv vlc gparted dosfstools ntfs-3g'
 
-    # Xserver
-    #packages+=' xorg-apps xorg-server xorg-xinit xterm'
-    packages+=' xdg-utils xorg-server xorg-server-common xorg-apps xorg-xinit xterm'
+
+    # Themeing
+    packages+=' qt5ct lxappearance-gtk3 capitaine-cursors kvantum-qt5 kvantum-theme-arc kvantum-theme-adapta adapta-gtk-theme papirus-icon-theme'
 
     # Virtualbox
-    packages+=' virtualbox-guest-dkms virtualbox-guest-utils xf86-video-vmware'
-    # Slim login manager
-    #packages+=' slim archlinux-themes-slim'
+    if [ -n "$VIRTUALBOX" ]
+    then
+        packages+=' virtualbox-guest-dkms virtualbox-guest-utils xf86-video-vmware'
+    fi
 
-    # Fonts
-    packages+=' ttf-dejavu ttf-liberation terminus-font ttf-font-awesome ttf-ubuntu-font-family'
-
-    # On Intel processors
-    packages+=' intel-ucode'
-
-    # For laptops
-    packages+=' libinput xf86-input-libinput'
+    # Desktop environment
+    packages+=' spectrwm lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings'
 
     # Extra packages for tc4200 tablet
     #packages+=' ipw2200-fw xf86-input-wacom'
